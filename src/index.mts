@@ -158,6 +158,9 @@ async function checkPythonPackageManagers(debug = false): Promise<{
         diagnostics += `✓ ${cmd}: Found (${result.stdout.trim()})\n`;
         // If we found a valid command and haven't set one yet, use this one
         if (cmd === "python -m uv" || cmd === "python3 -m uv") {
+          if (debug) {
+            console.log(`Found Python package manager: ${cmd}`);
+          }
           return { installed: true, command: cmd, diagnostics };
         }
       } else {
@@ -165,39 +168,66 @@ async function checkPythonPackageManagers(debug = false): Promise<{
         diagnostics += `✓ ${cmd}: Found (${result.toString().trim()})\n`;
         // If it's uvx or uv, return immediately as these are preferred
         if (cmd === "uvx" || cmd === "uv") {
+          if (debug) {
+            console.log(`Found Python package manager: ${cmd}`);
+          }
           return { installed: true, command: cmd, diagnostics };
         }
       }
     } catch (e) {
+      if (debug) {
+        console.log(`Python package manager not found: ${cmd}, error: ${e}`);
+      }
       diagnostics += `✗ ${cmd}: Not found or error (${e})\n`;
     }
   }
   
   // Check PATH environment
   diagnostics += `\nPATH environment: ${process.env.PATH}\n`;
+  if (debug) {
+    console.log(`PATH environment: ${process.env.PATH}`);
+  }
   
   // Check Python version
   try {
     const pythonVersion = await execAsync("python --version");
     diagnostics += `Python version: ${pythonVersion.stdout.trim()}\n`;
+    if (debug) {
+      console.log(`Python version: ${pythonVersion.stdout.trim()}`);
+    }
   } catch (e) {
     diagnostics += `Python not found or error\n`;
+    if (debug) {
+      console.log(`Python not found or error: ${e}`);
+    }
   }
   
   try {
     const python3Version = await execAsync("python3 --version");
     diagnostics += `Python3 version: ${python3Version.stdout.trim()}\n`;
+    if (debug) {
+      console.log(`Python3 version: ${python3Version.stdout.trim()}`);
+    }
   } catch (e) {
     diagnostics += `Python3 not found or error\n`;
+    if (debug) {
+      console.log(`Python3 not found or error: ${e}`);
+    }
   }
   
   // Check if we can run Python and import uv
   try {
     await execAsync("python -c 'import uv; print(\"uv is installed\")'");
     diagnostics += "Python can import uv module\n";
+    if (debug) {
+      console.log("Python can import uv module");
+    }
     return { installed: true, command: "python -m uv", diagnostics };
   } catch (e) {
     diagnostics += "Python cannot import uv module\n";
+    if (debug) {
+      console.log(`Python cannot import uv module: ${e}`);
+    }
   }
   
   // If we get here, we didn't find a valid Python package manager
@@ -209,7 +239,8 @@ const knownNpmPackages = [
   "@modelcontextprotocol/server-youtube",
   "@modelcontextprotocol/server-github",
   "@modelcontextprotocol/server-fetch",
-  "@modelcontextprotocol/server-browserless"
+  "@modelcontextprotocol/server-browserless",
+  "server-youtube"
 ];
 
 async function isNpmPackage(name: string) {
@@ -425,7 +456,12 @@ async function installRepoMcpServer(
   try {
     let command: string;
     
-    if (await isNpmPackage(name)) {
+    // Check for npm package first, with additional debug output
+    console.log(`Checking if ${name} is an npm package...`);
+    const isNpm = await isNpmPackage(name);
+    console.log(`isNpmPackage result for ${name}: ${isNpm}`);
+    
+    if (isNpm) {
       console.log(`Installing ${name} via npm...`);
       command = "npx";
       
@@ -438,6 +474,7 @@ async function installRepoMcpServer(
       }
     } else {
       // Check for Python package manager (uv or uvx)
+      console.log(`Checking Python package managers for ${name}...`);
       const pythonManagerResult = await checkPythonPackageManagers(debug);
       
       if (debug) {
