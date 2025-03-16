@@ -204,13 +204,67 @@ async function checkPythonPackageManagers(debug = false): Promise<{
   return { installed: false, command: "", diagnostics };
 }
 
+// List of known MCP packages that should be treated as npm packages
+const knownNpmPackages = [
+  "@modelcontextprotocol/server-youtube",
+  "@modelcontextprotocol/server-github",
+  "@modelcontextprotocol/server-fetch",
+  "@modelcontextprotocol/server-browserless"
+];
+
 async function isNpmPackage(name: string) {
-  try {
-    await spawnPromise("npm", ["view", name, "version"]);
+  // Always treat known MCP packages as npm packages
+  if (knownNpmPackages.includes(name)) {
+    console.log(`${name} is a known npm package, skipping verification`);
     return true;
-  } catch (e) {
-    return false;
   }
+
+  // Always treat packages with specific patterns as npm packages
+  if (name.startsWith("@modelcontextprotocol/")) {
+    console.log(`${name} starts with @modelcontextprotocol/, treating as an npm package`);
+    return true;
+  }
+
+  // Check package scoping - scoped packages are typically npm
+  if (name.startsWith("@") && name.includes("/")) {
+    console.log(`${name} is a scoped package, likely an npm package`);
+    return true;
+  }
+
+  // Try multiple npm commands to verify
+  try {
+    console.log(`Checking if ${name} is an npm package using "npm view"...`);
+    try {
+      // Primary check - most reliable but can fail due to network/registry issues
+      await spawnPromise("npm", ["view", name, "version"]);
+      console.log(`${name} verified as npm package via "npm view"`);
+      return true;
+    } catch (viewError) {
+      console.log(`"npm view" check failed, trying "npm search" as fallback...`);
+      try {
+        // Fallback check
+        const searchResult = await spawnPromise("npm", ["search", "--parseable", name]);
+        // Check if the search result includes the exact package name
+        const searchLines = searchResult.toString().split("\n");
+        for (const line of searchLines) {
+          const parts = line.split("\t");
+          if (parts[0] === name) {
+            console.log(`${name} verified as npm package via "npm search"`);
+            return true;
+          }
+        }
+      } catch (searchError) {
+        // Both checks failed, log the failures and return false
+        console.log(`Both "npm view" and "npm search" checks failed for ${name}`);
+        return false;
+      }
+    }
+  } catch (e) {
+    console.log(`Error checking if ${name} is an npm package: ${e}`);
+  }
+
+  // Default to false if all checks fail
+  return false;
 }
 
 // Generate a unique credential ID
@@ -395,11 +449,7 @@ async function installRepoMcpServer(
           content: [
             {
               type: "text",
-              text: `Python package manager (uv/uvx/pip) is not installed or could not be found. 
-Please install uv: https://docs.astral.sh/uv/
-
-Diagnostics:
-${pythonManagerResult.diagnostics}`,
+              text: `Python package manager (uv/uvx/pip) is not installed or could not be found. \nPlease install uv: https://docs.astral.sh/uv/\n\nDiagnostics:\n${pythonManagerResult.diagnostics}`,
             },
           ],
           isError: true,
@@ -472,25 +522,7 @@ ${pythonManagerResult.diagnostics}`,
       content: [
         {
           type: "text",
-          text: `
-MCP server ${name} installed successfully for n8n integration!
-
-1. Add this credential in n8n:
-${credentialOutput}
-
-2. Use this JSON for List Tools workflow:
-${listToolsOutput}
-
-3. Use this JSON for Execute Tool workflow:
-${executeToolOutput}
-
-Configuration saved to: ${configPath}
-
-To use this MCP server in n8n:
-1. Create a new credential in n8n of type "MCP Client API"
-2. Use the configuration above
-3. Create workflows using the MCP Client Tool node
-`,
+          text: `\nMCP server ${name} installed successfully for n8n integration!\n\n1. Add this credential in n8n:\n${credentialOutput}\n\n2. Use this JSON for List Tools workflow:\n${listToolsOutput}\n\n3. Use this JSON for Execute Tool workflow:\n${executeToolOutput}\n\nConfiguration saved to: ${configPath}\n\nTo use this MCP server in n8n:\n1. Create a new credential in n8n of type "MCP Client API"\n2. Use the configuration above\n3. Create workflows using the MCP Client Tool node\n`,
         },
       ],
     };
@@ -594,25 +626,7 @@ async function installLocalMcpServer(
         content: [
           {
             type: "text",
-            text: `
-Local MCP server ${serverName} installed successfully for n8n integration!
-
-1. Add this credential in n8n:
-${credentialOutput}
-
-2. Use this JSON for List Tools workflow:
-${listToolsOutput}
-
-3. Use this JSON for Execute Tool workflow:
-${executeToolOutput}
-
-Configuration saved to: ${configPath}
-
-To use this MCP server in n8n:
-1. Create a new credential in n8n of type "MCP Client API"
-2. Use the configuration above
-3. Create workflows using the MCP Client Tool node
-`,
+            text: `\nLocal MCP server ${serverName} installed successfully for n8n integration!\n\n1. Add this credential in n8n:\n${credentialOutput}\n\n2. Use this JSON for List Tools workflow:\n${listToolsOutput}\n\n3. Use this JSON for Execute Tool workflow:\n${executeToolOutput}\n\nConfiguration saved to: ${configPath}\n\nTo use this MCP server in n8n:\n1. Create a new credential in n8n of type "MCP Client API"\n2. Use the configuration above\n3. Create workflows using the MCP Client Tool node\n`,
           },
         ],
       };
@@ -647,27 +661,10 @@ async function debugPythonInstallation() {
     content: [
       {
         type: "text",
-        text: `Python Package Manager Debug Information:
-
-${pythonManagerResult.diagnostics}
-
-Python package manager found: ${pythonManagerResult.installed ? "Yes" : "No"}
-Command to use: ${pythonManagerResult.command || "None found"}
-
-System information:
-- OS: ${os.platform()} ${os.release()}
-- Node.js: ${process.version}
-- Architecture: ${os.arch()}
-- User: ${os.userInfo().username}
-- Home directory: ${os.homedir()}
-- Current directory: ${process.cwd()}
-
-Environment variables:
-${Object.entries(process.env)
+        text: `Python Package Manager Debug Information:\n\n${pythonManagerResult.diagnostics}\n\nPython package manager found: ${pythonManagerResult.installed ? "Yes" : "No"}\nCommand to use: ${pythonManagerResult.command || "None found"}\n\nSystem information:\n- OS: ${os.platform()} ${os.release()}\n- Node.js: ${process.version}\n- Architecture: ${os.arch()}\n- User: ${os.userInfo().username}\n- Home directory: ${os.homedir()}\n- Current directory: ${process.cwd()}\n\nEnvironment variables:\n${Object.entries(process.env)
   .filter(([key]) => ['PATH', 'PYTHONPATH', 'VIRTUAL_ENV', 'HOME', 'USER'].includes(key))
   .map(([key, value]) => `- ${key}: ${value}`)
-  .join('\n')}
-`,
+  .join('\n')}\n`,
       },
     ],
   };
