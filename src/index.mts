@@ -224,7 +224,7 @@ function installRepoWithArgsToClaudeDesktop(
   env?: string[]
 ) {
   // If the name is in a scoped package, we need to remove the scope
-  const serverName = /^@.*\\//i.test(name) ? name.split("/")[1] : name;
+  const serverName = /^@.*\//i.test(name) ? name.split("/")[1] : name;
 
   installToClaudeDesktop(
     serverName,
@@ -235,14 +235,15 @@ function installRepoWithArgsToClaudeDesktop(
 }
 
 // Find n8n node modules directory
-async function findN8nModulesDir() {
+async function findN8nModulesDir(): Promise<string> {
   try {
     // Check for local n8n installation
-    const { stdout: n8nPath } = await spawnPromise("which", ["n8n"]);
+    const n8nPathResult = await spawnPromise("which", ["n8n"]);
+    const n8nPath = n8nPathResult.toString().trim();
     
     if (n8nPath) {
       // Get n8n installation directory
-      const n8nDir = path.dirname(path.dirname(n8nPath.trim()));
+      const n8nDir = path.dirname(path.dirname(n8nPath));
       
       // Check for node_modules in the n8n directory
       const nodeModulesPath = path.join(n8nDir, "node_modules");
@@ -253,18 +254,19 @@ async function findN8nModulesDir() {
     }
     
     // Fallback to global node_modules
-    const { stdout: npmRoot } = await spawnPromise("npm", ["root", "-g"]);
-    return npmRoot.trim();
+    const npmRootResult = await spawnPromise("npm", ["root", "-g"]);
+    return npmRootResult.toString().trim();
   } catch (error) {
     console.error("Error finding n8n modules directory:", error);
     // Fallback to global npm root
     try {
-      const { stdout: npmRoot } = await spawnPromise("npm", ["root", "-g"]);
-      return npmRoot.trim();
+      const npmRootResult = await spawnPromise("npm", ["root", "-g"]);
+      return npmRootResult.toString().trim();
     } catch (e) {
       // Ultimate fallback for common global node_modules locations
       if (process.platform === "win32") {
-        return path.join(process.env.APPDATA, "npm", "node_modules");
+        const appDataPath = process.env.APPDATA || '';
+        return path.join(appDataPath, "npm", "node_modules");
       } else {
         return path.join("/usr", "local", "lib", "node_modules");
       }
@@ -272,17 +274,27 @@ async function findN8nModulesDir() {
   }
 }
 
-function generateCredentialId() {
+function generateCredentialId(): string {
   return crypto.randomBytes(8).toString('hex');
 }
 
 // Generate n8n credential configuration
-function generateN8nCredential(serverName, command, args, env, credentialName) {
+function generateN8nCredential(
+  serverName: string, 
+  command: string, 
+  args: string[], 
+  env?: string[], 
+  credentialName?: string
+): {
+  credential: any;
+  listToolsNode: any;
+  executeToolNode: any;
+} {
   // Clean up the server name for credential naming
   const cleanServerName = serverName.replace(/^@/, '').replace(/\//, '-');
   
   // Create environment object
-  const envObj = (env ?? []).reduce((acc, val) => {
+  const envObj = (env ?? []).reduce((acc: Record<string, string>, val: string) => {
     const [key, value] = val.split("=");
     acc[key] = value;
     return acc;
@@ -304,7 +316,7 @@ function generateN8nCredential(serverName, command, args, env, credentialName) {
   };
   
   // Create example MCP List Tools node
-  const listToolsNode = {
+  const listToolsNode: any = {
     nodes: [
       {
         parameters: {},
@@ -335,7 +347,7 @@ function generateN8nCredential(serverName, command, args, env, credentialName) {
   };
   
   // Create example MCP Execute Tool node
-  const executeToolNode = {
+  const executeToolNode: any = {
     nodes: [
       {
         parameters: {
@@ -377,7 +389,7 @@ function generateN8nCredential(serverName, command, args, env, credentialName) {
 }
 
 // Save credential config to a file
-function saveCredentialConfig(configObj, serverName) {
+function saveCredentialConfig(configObj: any, serverName: string): string {
   const homeDir = os.homedir();
   const configDir = path.join(homeDir, '.mcp-n8n-configs');
   
@@ -420,7 +432,12 @@ async function attemptNodeInstall(
   return {};
 }
 
-async function installRepoMcpServerForN8n(name, args, env, credentialName) {
+async function installRepoMcpServerForN8n(
+  name: string, 
+  args?: string[], 
+  env?: string[], 
+  credentialName?: string
+) {
   if (!(await hasNodeJs())) {
     return {
       content: [
@@ -437,7 +454,7 @@ async function installRepoMcpServerForN8n(name, args, env, credentialName) {
   const n8nModulesDir = await findN8nModulesDir();
   console.log(`Using n8n modules directory: ${n8nModulesDir}`);
 
-  let command, installCommand, args2;
+  let command: string, installCommand: string, args2: string[];
   
   if (await isNpmPackage(name)) {
     console.log(`Installing ${name} via npm...`);
@@ -532,7 +549,12 @@ To use this MCP server in n8n:
   }
 }
 
-async function installLocalMcpServerForN8n(dirPath, args, env, credentialName) {
+async function installLocalMcpServerForN8n(
+  dirPath: string, 
+  args?: string[], 
+  env?: string[], 
+  credentialName?: string
+) {
   if (!fs.existsSync(dirPath)) {
     return {
       content: [
@@ -575,7 +597,7 @@ async function installLocalMcpServerForN8n(dirPath, args, env, credentialName) {
       
       // Determine the binary path
       let command = "node";
-      let binArgs = [];
+      let binArgs: string[] = [];
       
       if (packageJson.bin) {
         // For npm package with binary
