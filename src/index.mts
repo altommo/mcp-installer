@@ -37,6 +37,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               description: "The package name of the MCP server",
             },
+            packageName: {
+              type: "string",
+              description: "The package name of the MCP server (alternative parameter name)",
+            },
             args: {
               type: "array",
               items: { type: "string" },
@@ -47,8 +51,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               items: { type: "string" },
               description: "The environment variables to set, delimited by =",
             },
+            integration: {
+              type: "string",
+              description: "Integration type (n8n)",
+              enum: ["n8n"]
+            }
           },
-          required: ["name"],
+          required: [],
         },
       },
       {
@@ -73,6 +82,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               items: { type: "string" },
               description: "The environment variables to set, delimited by =",
             },
+            integration: {
+              type: "string",
+              description: "Integration type (n8n)",
+              enum: ["n8n"]
+            }
           },
           required: ["path"],
         },
@@ -287,13 +301,19 @@ async function installRepoMcpServer(
   }
 
   try {
-    let command: string, installCommand: string, installArgs: string[];
+    let command: string;
     
     if (await isNpmPackage(name)) {
       console.log(`Installing ${name} via npm...`);
       command = "npx";
-      installCommand = "npm";
-      installArgs = ["install", "-g", name];
+      
+      try {
+        // Try to install locally first to avoid permission issues
+        await spawnPromise("npm", ["install", name]);
+      } catch (e) {
+        console.log("Local installation failed, trying global installation...");
+        await spawnPromise("npm", ["install", "-g", name]);
+      }
     } else {
       if (!(await hasUvx())) {
         return {
@@ -309,20 +329,26 @@ async function installRepoMcpServer(
       
       console.log(`Installing ${name} via uvx...`);
       command = "uvx";
-      installCommand = "uv";
-      installArgs = ["pip", "install", name];
+      
+      try {
+        await spawnPromise("uv", ["pip", "install", name]);
+      } catch (e) {
+        console.log("User installation failed, trying system installation...");
+        await spawnPromise("uv", ["pip", "install", "--system", name]);
+      }
     }
-
-    // Install the package
-    console.log(`Running: ${installCommand} ${installArgs.join(' ')}`);
-    await spawnPromise(installCommand, installArgs);
     
     // Also install n8n-nodes-mcp if not installed
     try {
       await spawnPromise("npm", ["list", "-g", "n8n-nodes-mcp"]);
     } catch (e) {
       console.log("Installing n8n-nodes-mcp...");
-      await spawnPromise("npm", ["install", "-g", "n8n-nodes-mcp"]);
+      try {
+        await spawnPromise("npm", ["install", "n8n-nodes-mcp"]);
+      } catch (localErr) {
+        console.log("Local installation failed, trying global installation...");
+        await spawnPromise("npm", ["install", "-g", "n8n-nodes-mcp"]);
+      }
     }
     
     // Generate n8n credential configuration
@@ -334,7 +360,13 @@ async function installRepoMcpServer(
     );
     
     // Save configuration to file
-    const configPath = saveConfigToFile(configObj, name);
+    let configPath;
+    try {
+      configPath = saveConfigToFile(configObj, name);
+    } catch (e) {
+      console.error("Error saving configuration file:", e);
+      configPath = "Could not save configuration file";
+    }
     
     // Format the output for better console display
     const credentialOutput = JSON.stringify(configObj.credential, null, 2);
@@ -404,7 +436,12 @@ async function installLocalMcpServer(
         await spawnPromise("npm", ["list", "-g", "n8n-nodes-mcp"]);
       } catch (e) {
         console.log("Installing n8n-nodes-mcp...");
-        await spawnPromise("npm", ["install", "-g", "n8n-nodes-mcp"]);
+        try {
+          await spawnPromise("npm", ["install", "n8n-nodes-mcp"]);
+        } catch (localErr) {
+          console.log("Local installation failed, trying global installation...");
+          await spawnPromise("npm", ["install", "-g", "n8n-nodes-mcp"]);
+        }
       }
       
       // Read package.json to get the name
@@ -445,7 +482,13 @@ async function installLocalMcpServer(
       );
       
       // Save configuration to file
-      const configPath = saveConfigToFile(configObj, serverName);
+      let configPath;
+      try {
+        configPath = saveConfigToFile(configObj, serverName);
+      } catch (e) {
+        console.error("Error saving configuration file:", e);
+        configPath = "Could not save configuration file";
+      }
       
       // Format the output for better console display
       const credentialOutput = JSON.stringify(configObj.credential, null, 2);
@@ -505,8 +548,22 @@ To use this MCP server in n8n:
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     if (request.params.name === "install_repo_mcp_server") {
-      const { name, args, env } = request.params.arguments as {
-        name: string;
+      // Support both name and packageName parameters
+      const name = request.params.arguments?.name || request.params.arguments?.packageName;
+      
+      if (!name) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "Error: Package name is required. Please provide either 'name' or 'packageName' parameter.",
+            },
+          ],
+          isError: true,
+        };
+      }
+      
+      const { args, env } = request.params.arguments as {
         args?: string[];
         env?: string[];
       };
