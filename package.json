@@ -4,7 +4,7 @@
   "bin": {
     "mcp-installer": "./lib/index.mjs"
   },
-  "description": "A MCP server to install other MCP servers, with n8n integration support",
+  "description": "A MCP server to install other MCP servers for n8n integration",
   "main": "index.js",
   "scripts": {
     "prepare": "tsc && shx chmod +x ./lib/index.mjs"
