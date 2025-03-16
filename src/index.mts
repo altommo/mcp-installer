@@ -11,6 +11,10 @@ import * as fs from "fs";
 import * as path from "path";
 import { spawnPromise } from "spawn-rx";
 import * as crypto from "crypto";
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
 
 const server = new Server(
   {
@@ -63,6 +67,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             n8n_integration: {
               type: "boolean",
               description: "Whether to set up n8n integration",
+            },
+            debug: {
+              type: "boolean",
+              description: "Show debug information",
+              default: false
             }
           },
           required: [],
@@ -98,9 +107,23 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             n8n_integration: {
               type: "boolean",
               description: "Whether to set up n8n integration",
+            },
+            debug: {
+              type: "boolean",
+              description: "Show debug information",
+              default: false
             }
           },
           required: ["path"],
+        },
+      },
+      {
+        name: "debug_python_installation",
+        description: "Debug Python installation",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          required: [],
         },
       },
     ],
@@ -116,21 +139,69 @@ async function hasNodeJs() {
   }
 }
 
-// Check for either uv or uvx
-async function hasPythonPackageManager() {
-  try {
-    // Try uvx first
-    await spawnPromise("uvx", ["--version"]);
-    return { installed: true, command: "uvx" };
-  } catch (e) {
+// Check for available Python package managers with full diagnostics
+async function checkPythonPackageManagers(debug = false): Promise<{ 
+  installed: boolean; 
+  command: string;
+  diagnostics: string;
+}> {
+  let diagnostics = "Python package manager diagnostics:\n";
+  
+  // Check for various commands
+  const commands = ["uvx", "uv", "pip", "pip3", "python -m uv", "python3 -m uv"];
+  
+  for (const cmd of commands) {
     try {
-      // Try uv if uvx fails
-      await spawnPromise("uv", ["--version"]);
-      return { installed: true, command: "uv" };
-    } catch (err) {
-      return { installed: false, command: "" };
+      // For commands with spaces, we need to use exec
+      if (cmd.includes(" ")) {
+        const result = await execAsync(`${cmd} --version`);
+        diagnostics += `✓ ${cmd}: Found (${result.stdout.trim()})\n`;
+        // If we found a valid command and haven't set one yet, use this one
+        if (cmd === "python -m uv" || cmd === "python3 -m uv") {
+          return { installed: true, command: cmd, diagnostics };
+        }
+      } else {
+        const result = await spawnPromise(cmd, ["--version"]);
+        diagnostics += `✓ ${cmd}: Found (${result.toString().trim()})\n`;
+        // If it's uvx or uv, return immediately as these are preferred
+        if (cmd === "uvx" || cmd === "uv") {
+          return { installed: true, command: cmd, diagnostics };
+        }
+      }
+    } catch (e) {
+      diagnostics += `✗ ${cmd}: Not found or error (${e})\n`;
     }
   }
+  
+  // Check PATH environment
+  diagnostics += `\nPATH environment: ${process.env.PATH}\n`;
+  
+  // Check Python version
+  try {
+    const pythonVersion = await execAsync("python --version");
+    diagnostics += `Python version: ${pythonVersion.stdout.trim()}\n`;
+  } catch (e) {
+    diagnostics += `Python not found or error\n`;
+  }
+  
+  try {
+    const python3Version = await execAsync("python3 --version");
+    diagnostics += `Python3 version: ${python3Version.stdout.trim()}\n`;
+  } catch (e) {
+    diagnostics += `Python3 not found or error\n`;
+  }
+  
+  // Check if we can run Python and import uv
+  try {
+    await execAsync("python -c 'import uv; print(\"uv is installed\")'");
+    diagnostics += "Python can import uv module\n";
+    return { installed: true, command: "python -m uv", diagnostics };
+  } catch (e) {
+    diagnostics += "Python cannot import uv module\n";
+  }
+  
+  // If we get here, we didn't find a valid Python package manager
+  return { installed: false, command: "", diagnostics };
 }
 
 async function isNpmPackage(name: string) {
@@ -282,7 +353,8 @@ function saveConfigToFile(configObj: any, serverName: string): string {
 async function installRepoMcpServer(
   name: string,
   args?: string[],
-  env?: string[]
+  env?: string[],
+  debug = false
 ) {
   if (!(await hasNodeJs())) {
     return {
@@ -312,35 +384,51 @@ async function installRepoMcpServer(
       }
     } else {
       // Check for Python package manager (uv or uvx)
-      const pythonManager = await hasPythonPackageManager();
+      const pythonManagerResult = await checkPythonPackageManagers(debug);
       
-      if (!pythonManager.installed) {
+      if (debug) {
+        console.log(pythonManagerResult.diagnostics);
+      }
+      
+      if (!pythonManagerResult.installed) {
         return {
           content: [
             {
               type: "text",
-              text: `Python uv/uvx is not installed, please install it! Tell users to go to https://docs.astral.sh/uv`,
+              text: `Python package manager (uv/uvx/pip) is not installed or could not be found. 
+Please install uv: https://docs.astral.sh/uv/
+
+Diagnostics:
+${pythonManagerResult.diagnostics}`,
             },
           ],
           isError: true,
         };
       }
       
-      console.log(`Installing ${name} via ${pythonManager.command}...`);
-      command = pythonManager.command;
+      console.log(`Installing ${name} via ${pythonManagerResult.command}...`);
+      command = pythonManagerResult.command;
       
       try {
-        if (pythonManager.command === "uvx") {
+        if (pythonManagerResult.command === "uvx") {
           await spawnPromise("uvx", ["pip", "install", name]);
-        } else {
+        } else if (pythonManagerResult.command === "uv") {
           await spawnPromise("uv", ["pip", "install", name]);
+        } else if (pythonManagerResult.command.includes("python")) {
+          await execAsync(`${pythonManagerResult.command} pip install ${name}`);
+        } else {
+          await spawnPromise(pythonManagerResult.command, ["install", name]);
         }
       } catch (e) {
         console.log("User installation failed, trying system installation...");
-        if (pythonManager.command === "uvx") {
+        if (pythonManagerResult.command === "uvx") {
           await spawnPromise("uvx", ["pip", "install", "--system", name]);
-        } else {
+        } else if (pythonManagerResult.command === "uv") {
           await spawnPromise("uv", ["pip", "install", "--system", name]);
+        } else if (pythonManagerResult.command.includes("python")) {
+          await execAsync(`${pythonManagerResult.command} pip install ${name} --user`);
+        } else {
+          await spawnPromise(pythonManagerResult.command, ["install", "--user", name]);
         }
       }
     }
@@ -552,6 +640,39 @@ To use this MCP server in n8n:
   };
 }
 
+async function debugPythonInstallation() {
+  const pythonManagerResult = await checkPythonPackageManagers(true);
+  
+  return {
+    content: [
+      {
+        type: "text",
+        text: `Python Package Manager Debug Information:
+
+${pythonManagerResult.diagnostics}
+
+Python package manager found: ${pythonManagerResult.installed ? "Yes" : "No"}
+Command to use: ${pythonManagerResult.command || "None found"}
+
+System information:
+- OS: ${os.platform()} ${os.release()}
+- Node.js: ${process.version}
+- Architecture: ${os.arch()}
+- User: ${os.userInfo().username}
+- Home directory: ${os.homedir()}
+- Current directory: ${process.cwd()}
+
+Environment variables:
+${Object.entries(process.env)
+  .filter(([key]) => ['PATH', 'PYTHONPATH', 'VIRTUAL_ENV', 'HOME', 'USER'].includes(key))
+  .map(([key, value]) => `- ${key}: ${value}`)
+  .join('\n')}
+`,
+      },
+    ],
+  };
+}
+
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     if (request.params.name === "install_repo_mcp_server") {
@@ -573,12 +694,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
       
-      const { args, env } = request.params.arguments as {
+      const { args, env, debug } = request.params.arguments as {
         args?: string[];
         env?: string[];
+        debug?: boolean;
       };
 
-      return await installRepoMcpServer(name, args, env);
+      return await installRepoMcpServer(name, args, env, debug);
     }
 
     if (request.params.name === "install_local_mcp_server") {
@@ -589,6 +711,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
 
       return await installLocalMcpServer(dirPath, args, env);
+    }
+    
+    if (request.params.name === "debug_python_installation") {
+      return await debugPythonInstallation();
     }
 
     throw new Error(`Unknown tool: ${request.params.name}`);
