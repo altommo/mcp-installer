@@ -259,30 +259,6 @@ function saveConfigToFile(configObj: any, serverName: string): string {
   return configPath;
 }
 
-async function attemptNodeInstall(
-  directory: string
-): Promise<Record<string, string>> {
-  await spawnPromise("npm", ["install"], { cwd: directory });
-
-  // Run down package.json looking for bins
-  const pkg = JSON.parse(
-    fs.readFileSync(path.join(directory, "package.json"), "utf-8")
-  );
-
-  if (pkg.bin) {
-    return Object.keys(pkg.bin).reduce((acc, key) => {
-      acc[key] = path.resolve(directory, pkg.bin[key]);
-      return acc;
-    }, {} as Record<string, string>);
-  }
-
-  if (pkg.main) {
-    return { [pkg.name]: path.resolve(directory, pkg.main) };
-  }
-
-  return {};
-}
-
 async function installRepoMcpServer(
   name: string,
   args?: string[],
@@ -549,7 +525,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     if (request.params.name === "install_repo_mcp_server") {
       // Support both name and packageName parameters
-      const name = request.params.arguments?.name || request.params.arguments?.packageName;
+      const name = 
+        (request.params.arguments?.name as string) || 
+        (request.params.arguments?.packageName as string);
       
       if (!name) {
         return {
