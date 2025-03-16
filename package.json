@@ -1,10 +1,10 @@
 {
   "name": "@anaisbetts/mcp-installer",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "bin": {
     "mcp-installer": "./lib/index.mjs"
   },
-  "description": "A MCP server to install other MCP servers",
+  "description": "A MCP server to install other MCP servers, with n8n integration support",
   "main": "index.js",
   "scripts": {
     "prepare": "tsc && shx chmod +x ./lib/index.mjs"
@@ -14,9 +14,12 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.1",
     "rimraf": "^6.0.1",
-    "spawn-rx": "^4.0.0"
+    "spawn-rx": "^4.0.0",
+    "n8n": "^1.29.1",
+    "crypto-js": "^4.2.0"
   },
   "devDependencies": {
+    "@types/crypto-js": "^4.2.2",
     "shx": "^0.3.4",
     "ts-node": "^10.9.2",
     "typescript": "^5.6.3"
