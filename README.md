@@ -1,16 +1,15 @@
-# mcp-installer - A MCP Server to install MCP Servers (with n8n support)
+# mcp-installer - A MCP Server to install MCP Servers for n8n
 
-This server is a server that installs other MCP servers for you. Install it, and you can ask Claude to install MCP servers hosted in npm or PyPi for you. It also provides special support for n8n integration.
+This server installs MCP servers from npm or PyPi packages specifically for n8n integration. It handles installation and generates the necessary credential configurations for using MCP servers with n8n workflows.
 
 Requires `npx` and `uv` to be installed for node and Python servers respectively.
 
-![image](https://github.com/user-attachments/assets/d082e614-b4bc-485c-a7c5-f80680348793)
+## Installation
 
-### How to install:
-
-Put this into your `claude_desktop_config.json` (either at `~/Library/Application Support/Claude` on macOS or `C:\Users\NAME\AppData\Roaming\Claude` on Windows):
+Put this into your MCP client configuration:
 
 ```json
+{
   "mcpServers": {
     "mcp-installer": {
       "command": "npx",
@@ -19,127 +18,55 @@ Put this into your `claude_desktop_config.json` (either at `~/Library/Applicatio
       ]
     }
   }
-```
-
-### Example prompts
-
-> Hey Claude, install the MCP server named mcp-server-fetch
-
-> Hey Claude, install the @modelcontextprotocol/server-filesystem package as an MCP server. Use ['/Users/anibetts/Desktop'] for the arguments
-
-> Hi Claude, please install the MCP server at /Users/anibetts/code/mcp-youtube, I'm too lazy to do it myself.
-
-> Install the server @modelcontextprotocol/server-github. Set the environment variable GITHUB_PERSONAL_ACCESS_TOKEN to '1234567890'
-
-### n8n Integration
-
-This fork adds special support for integrating MCP servers with n8n:
-
-```
-Install hyperbrowser-mcp MCP server for n8n integration
-
-Install the MCP server @modelcontextprotocol/server-filesystem for n8n with arguments ['/path/to/directory']
-
-Install the local MCP server at /path/to/local/mcp-server for n8n integration with credential name "My Custom MCP Server"
-```
-
-The installer will:
-
-1. Install the MCP server in the appropriate location for n8n access
-2. Install n8n-nodes-mcp if not already installed
-3. Generate n8n credential configuration in the format needed for the MCP Client node
-4. Output two example n8n workflow nodes:
-   - A "List Tools" node that lists all tools from the MCP server
-   - An "Execute Tool" node that can execute any tool from the server
-5. Save configuration to a file in `.mcp-n8n-configs/` for future reference
-
-#### Usage in n8n:
-
-1. After installing an MCP server with this tool, copy the credential configuration from the output
-2. In n8n, create a new credential of type "MCP Client API" and paste the copied configuration
-3. Create a new workflow and add a "MCP Client Tool" node
-4. Configure the node to use the credential you created
-5. Choose either to list available tools or execute a specific tool
-
-The credential format will look something like:
-
-```json
-{
-  "id": "uniqueId",
-  "name": "Server Name MCP",
-  "data": {
-    "command": "npx",
-    "args": ["package-name"],
-    "env": {}
-  },
-  "type": "mcpClientApi"
 }
 ```
 
-#### Example Workflow Nodes
+## Example prompts
 
-The installer generates two sample workflow nodes that you can import into n8n:
+> Install the MCP server named mcp-server-fetch for n8n integration
 
-1. **List Tools Node**: Lists all available tools from the MCP server
-```json
-{
-  "nodes": [
-    {
-      "parameters": {},
-      "type": "n8n-nodes-mcp.mcpClientTool",
-      "typeVersion": 1,
-      "position": [580, 700],
-      "credentials": {
-        "mcpClientApi": {
-          "id": "credentialId",
-          "name": "Server MCP"
-        }
-      }
-    }
-  ],
-  "connections": {
-    "MCP Client Server Tools": {
-      "ai_tool": [[]]
-    }
-  }
-}
-```
+> Install the @modelcontextprotocol/server-github package as an MCP server for n8n integration. Set the environment variable GITHUB_PERSONAL_ACCESS_TOKEN to '1234567890'
 
-2. **Execute Tool Node**: Executes a specific tool from the MCP server
-```json
-{
-  "nodes": [
-    {
-      "parameters": {
-        "operation": "executeTool",
-        "toolName": "={{ $fromAI(\"tool\",\"Set this with specific tool name\") }}",
-        "toolParameters": "={{ $fromAI('Tool_Parameters', '', 'json') }}"
-      },
-      "type": "n8n-nodes-mcp.mcpClientTool",
-      "typeVersion": 1,
-      "position": [620, 740],
-      "credentials": {
-        "mcpClientApi": {
-          "id": "credentialId",
-          "name": "Server MCP"
-        }
-      }
-    }
-  ],
-  "connections": {
-    "Server Tools Execute": {
-      "ai_tool": [[]]
-    }
-  }
-}
-```
+> Install the local MCP server at /path/to/mcp-server for n8n integration
 
-### Requirements
+## Features
 
-To use the n8n integration:
+This installer focuses exclusively on n8n integration:
 
-1. n8n must be installed on your system (`npm install -g n8n`)
-2. The n8n-nodes-mcp package must be installed (`npm install -g n8n-nodes-mcp`)
-3. The MCP server you're installing must be accessible to n8n
+1. Installs MCP servers from npm or PyPi packages
+2. Ensures n8n-nodes-mcp is installed if not already present
+3. Generates credential configuration in n8n-compatible format
+4. Creates example workflow nodes for "List Tools" and "Execute Tool" operations
+5. Saves configuration to a local file for reference
 
-For more information about using MCP servers with n8n, see the [n8n-nodes-mcp documentation](https://github.com/nerding-io/n8n-nodes-mcp).
+## Output
+
+After installing an MCP server, you'll receive:
+
+1. **n8n Credential Configuration** - JSON to add as a credential in n8n
+2. **List Tools Workflow** - JSON for a workflow node to list all available tools
+3. **Execute Tool Workflow** - JSON for a workflow node to execute a specific tool
+
+## Using in n8n
+
+1. Make sure you have the n8n-nodes-mcp package installed:
+   ```bash
+   npm install -g n8n-nodes-mcp
+   ```
+
+2. In the n8n interface:
+   - Go to Settings > Credentials
+   - Create a new "MCP Client API" credential using the output from the installer
+   - Create workflows using the MCP Client Tool node
+
+## Example Workflow
+
+Here's how to use an MCP server in n8n:
+
+1. Create a credential using the JSON output from the installer
+2. Create a workflow with an MCP Client Tool node
+3. Configure the node to use your credential
+4. First fetch the list of available tools
+5. Then create another node to execute a specific tool
+
+All configuration details are saved to `~/.n8n-mcp-configs/` for future reference.
