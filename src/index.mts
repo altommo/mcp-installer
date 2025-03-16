@@ -41,6 +41,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               description: "The package name of the MCP server (alternative parameter name)",
             },
+            repository: {
+              type: "string",
+              description: "The package name of the MCP server (alternative parameter name)",
+            },
             args: {
               type: "array",
               items: { type: "string" },
@@ -55,6 +59,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               description: "Integration type (n8n)",
               enum: ["n8n"]
+            },
+            n8n_integration: {
+              type: "boolean",
+              description: "Whether to set up n8n integration",
             }
           },
           required: [],
@@ -86,6 +94,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               description: "Integration type (n8n)",
               enum: ["n8n"]
+            },
+            n8n_integration: {
+              type: "boolean",
+              description: "Whether to set up n8n integration",
             }
           },
           required: ["path"],
@@ -104,12 +116,20 @@ async function hasNodeJs() {
   }
 }
 
-async function hasUvx() {
+// Check for either uv or uvx
+async function hasPythonPackageManager() {
   try {
+    // Try uvx first
     await spawnPromise("uvx", ["--version"]);
-    return true;
+    return { installed: true, command: "uvx" };
   } catch (e) {
-    return false;
+    try {
+      // Try uv if uvx fails
+      await spawnPromise("uv", ["--version"]);
+      return { installed: true, command: "uv" };
+    } catch (err) {
+      return { installed: false, command: "" };
+    }
   }
 }
 
@@ -291,26 +311,37 @@ async function installRepoMcpServer(
         await spawnPromise("npm", ["install", "-g", name]);
       }
     } else {
-      if (!(await hasUvx())) {
+      // Check for Python package manager (uv or uvx)
+      const pythonManager = await hasPythonPackageManager();
+      
+      if (!pythonManager.installed) {
         return {
           content: [
             {
               type: "text",
-              text: `Python uv is not installed, please install it! Tell users to go to https://docs.astral.sh/uv`,
+              text: `Python uv/uvx is not installed, please install it! Tell users to go to https://docs.astral.sh/uv`,
             },
           ],
           isError: true,
         };
       }
       
-      console.log(`Installing ${name} via uvx...`);
-      command = "uvx";
+      console.log(`Installing ${name} via ${pythonManager.command}...`);
+      command = pythonManager.command;
       
       try {
-        await spawnPromise("uv", ["pip", "install", name]);
+        if (pythonManager.command === "uvx") {
+          await spawnPromise("uvx", ["pip", "install", name]);
+        } else {
+          await spawnPromise("uv", ["pip", "install", name]);
+        }
       } catch (e) {
         console.log("User installation failed, trying system installation...");
-        await spawnPromise("uv", ["pip", "install", "--system", name]);
+        if (pythonManager.command === "uvx") {
+          await spawnPromise("uvx", ["pip", "install", "--system", name]);
+        } else {
+          await spawnPromise("uv", ["pip", "install", "--system", name]);
+        }
       }
     }
     
@@ -524,17 +555,18 @@ To use this MCP server in n8n:
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     if (request.params.name === "install_repo_mcp_server") {
-      // Support both name and packageName parameters
+      // Support multiple parameter names
       const name = 
         (request.params.arguments?.name as string) || 
-        (request.params.arguments?.packageName as string);
+        (request.params.arguments?.packageName as string) ||
+        (request.params.arguments?.repository as string);
       
       if (!name) {
         return {
           content: [
             {
               type: "text",
-              text: "Error: Package name is required. Please provide either 'name' or 'packageName' parameter.",
+              text: "Error: Package name is required. Please provide 'name', 'packageName', or 'repository' parameter.",
             },
           ],
           isError: true,
